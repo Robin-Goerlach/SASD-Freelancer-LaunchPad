@@ -12,7 +12,7 @@ The first version focuses on manual project tracking and local data storage. Aut
 
 > Preliminary UI design for the prompt library, featuring navigation, search, filtering, a prompt list, and a detail view.
 
-![SASD Prompt Manager Screenshot](docs/screenshots/prompt-manager-dashboard.png)
+![SASD Freelancer LaunchPad dashboard Screenshot](docs/screenshots/SASD-Freelancer-LaunchPad-dashboard-overview.png)
 
 If the screenshot is not yet visible in the repository, the file should be placed at the following path:
 
