@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SASD.FreelancerLaunchPad.Core\SASD.FreelancerLaunchPad.Core.csproj" />
+    <ProjectReference Include="..\SASD.FreelancerLaunchPad.Data\SASD.FreelancerLaunchPad.Data.csproj" />
+  </ItemGroup>
+</Project>

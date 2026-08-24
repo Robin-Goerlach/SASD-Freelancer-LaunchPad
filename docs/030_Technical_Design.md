@@ -1,712 +1,2191 @@
 # SASD Freelancer LaunchPad – Technical Design
 
-Version: 0.1  
-Status: MVP-Architekturentwurf  
-Projekt: SASD Freelancer LaunchPad  
-Organisation: SASD GmbH  
-Dokumenttyp: Technical Design  
-Sprache: Deutsch  
+**Version:** 0.2  
+**Status:** Baseline-Kandidat – an Lastenheft 0.2, Pflichtenheft 0.2 und Architecture 0.1 angepasst  
+**Projekt:** SASD Freelancer LaunchPad  
+**Organisation:** SASD GmbH  
+**Dokumenttyp:** Technical Design  
+**Sprache:** Deutsch  
+**Stand:** 24.08.2026  
+**Führende Grundlagen:** `010_Lastenheft.md`, `020_Pflichtenheft_MVP.md`, `050_Architecture.md`
 
 ---
 
-# 1. Zweck des Dokuments
+# 0. Dokumentkontrolle
 
-Dieses Dokument beschreibt das technische Design der MVP-Version von **SASD Freelancer LaunchPad**.
+## 0.1 Zweck
 
-Es übersetzt die fachlichen Anforderungen aus Lastenheft und Pflichtenheft in eine konkrete technische Struktur. Ziel ist eine kleine, stabile, wartbare Windows-Desktop-Anwendung, die schnell nutzbar ist und später kontrolliert erweitert werden kann.
+Dieses Dokument konkretisiert die technische Umsetzung des **ersten praktisch nutzbaren Produktstands**.
 
-Der Schwerpunkt liegt nicht auf maximaler Architekturkomplexität, sondern auf einem klaren, verständlichen und produktiv umsetzbaren Aufbau.
+Es beantwortet:
 
----
+> **Wie wird die beschlossene Architektur mit C#/.NET, Windows Forms und SQLite konkret umgesetzt, ohne spätere Produktziele unnötig zu verbauen?**
 
-# 2. Architekturziel
-
-## 2.1 Leitidee
-
-Die Anwendung soll als lokale Desktop-Anwendung entwickelt werden, die Freelancer-Projekte strukturiert erfasst, verwaltet und später auswertbar macht.
-
-Das zentrale Architekturziel lautet:
-
-> Eine einfache, robuste und verständliche MVP-Architektur, die sofort Nutzen liefert und spätere Erweiterungen nicht blockiert.
-
-## 2.2 Nicht-Ziel der Architektur
-
-Die MVP-Architektur soll ausdrücklich NICHT versuchen, bereits alle später denkbaren Ausbaustufen vollständig abzubilden.
-
-Nicht Ziel des MVP-Designs sind:
-
-- komplexe Plugin-Architektur
-- Enterprise-Framework-Overhead
-- Cloud-Synchronisation
-- Multi-User-Betrieb
-- automatische Scraping-Pipeline
-- mandantenfähige Plattform
-- übermäßig abstrakte Repository-/Service-Schichten
-
-Die Architektur soll klein bleiben, aber nicht schlampig werden.
+Es ist bewusst konkreter als `050_Architecture.md`, darf dessen Abhängigkeitsregeln aber nicht verletzen.
 
 ---
 
-# 3. Technologiestack
+## 0.2 Abgrenzung
+
+Dieses Dokument führt:
+
+- konkrete .NET-/UI-/Persistenzentscheidungen,
+- Projektstruktur,
+- Namespace-Struktur,
+- Application Use Cases,
+- konkrete technische Ports,
+- Fehlerbehandlung,
+- Logging,
+- Teststruktur,
+- Start-/Shutdown-Verhalten,
+- Migration des vorhandenen Prototyps.
+
+Nicht führend sind hier:
+
+- Produkt-Scope,
+- Release-Reihenfolge,
+- exakte SQL-DDL,
+- Wettbewerbsanalyse,
+- Datenschutz-Retention,
+- konkrete Plattformparser.
+
+---
+
+## 0.3 Ausgangslage
+
+Der vorhandene frühe Prototyp verwendet:
+
+```text
+SASD.FreelancerLaunchPad.App
+SASD.FreelancerLaunchPad.Core
+SASD.FreelancerLaunchPad.Data
+SASD.FreelancerLaunchPad.Tests
+```
+
+mit:
+
+- `.NET 10`,
+- Windows Forms,
+- `Microsoft.Data.Sqlite`,
+- SQLite,
+- einem `FreelanceProject`-zentrierten Modell,
+- direkter Repository-Nutzung,
+- `projects` als zentraler Tabelle.
+
+Diese technische Basis ist grundsätzlich brauchbar.
+
+Fachlich überholt sind jedoch:
+
+- `Project` als Kombination aus realem Projekt und Listing,
+- `Applied/Won/Rejected/Archived` als Opportunity-Status,
+- `platform_id` direkt am realen Projekt,
+- nur ein Preis-/Rate-Modell,
+- fehlendes Proposal-Objekt.
+
+Der Prototyp wird deshalb **refaktoriert**, nicht blind fortgeschrieben.
+
+---
+
+# 1. Technologiestack
+
+## 1.1 Festgelegter Stack
 
 | Bereich | Entscheidung |
 |---|---|
-| Programmiersprache | C# |
-| Runtime / Framework | .NET 10 |
-| Benutzeroberfläche | Windows Forms |
-| Datenbank | SQLite |
-| Datenzugriff | Microsoft.Data.Sqlite |
-| Tests | xUnit oder MSTest, später festzulegen |
-| IDE | Visual Studio |
-| Versionsverwaltung | Git |
-| Repository | GitHub |
+| Sprache | C# |
+| Runtime | .NET 10 |
+| Domain/Application Target | `net10.0` |
+| Windows UI Target | `net10.0-windows` |
+| UI | Windows Forms |
+| Persistenz | SQLite |
+| Datenzugriff | `Microsoft.Data.Sqlite` |
+| DI/Host | `Microsoft.Extensions.Hosting` / DI |
+| Logging-Abstraktion | `Microsoft.Extensions.Logging` |
+| Tests | xUnit |
+| Repository | Git / GitHub |
+| IDE | Visual Studio 2022 bzw. kompatible aktuelle Visual-Studio-Version |
 
 ---
 
-# 4. Solution-Struktur
+## 1.2 Warum .NET 10
 
-Die Solution soll nicht aus nur einem einzigen Projekt bestehen. Auch für den MVP ist eine kleine Trennung sinnvoll, damit die Anwendung später nicht unwartbar wird.
+**TD-001**
+
+Der aktuelle Code arbeitet bereits mit .NET 10.
+
+Die Neuausrichtung soll keinen unnötigen Framework-Downgrade erzeugen.
+
+---
+
+## 1.3 Warum Windows Forms
+
+**TD-002**
+
+Windows Forms bleibt für den frühen Windows-Desktop-Stand gesetzt, weil:
+
+- der vorhandene Prototyp bereits darauf basiert,
+- schnelle produktive Desktop-Entwicklung möglich ist,
+- kein zusätzlicher UI-Technologiewechsel nötig ist,
+- 1280×720 mit sorgfältigem Layout unterstützt werden kann.
+
+Die Architektur verhindert trotzdem, dass Domain/Application von WinForms abhängen.
+
+---
+
+## 1.4 Warum `Microsoft.Data.Sqlite`
+
+**TD-003**
+
+Der direkte SQLite-Zugriff bleibt über `Microsoft.Data.Sqlite`.
+
+Für den MVP wird kein ORM eingeführt.
+
+Begründung:
+
+- kleines Schema,
+- volle Kontrolle über Migrationen und SQL,
+- geringe Abhängigkeiten,
+- bestehender Code nutzt die Bibliothek bereits,
+- Datenbankdesign ist wichtiger als ORM-Komfort.
+
+Ein späterer ORM-Wechsel ist keine aktuelle Anforderung.
+
+---
+
+# 2. Solution- und Projektstruktur
+
+## 2.1 Zielstruktur
 
 ```text
-SASD.FreelancerLaunchPad/
-  src/
-    SASD.FreelancerLaunchPad.App/
-    SASD.FreelancerLaunchPad.Core/
-    SASD.FreelancerLaunchPad.Data/
-    SASD.FreelancerLaunchPad.Import/
-  tests/
-    SASD.FreelancerLaunchPad.Tests/
-  database/
-    001_create_initial_schema.sql
-    002_insert_seed_data.sql
-  docs/
-    010_Lastenheft.md
-    020_Pflichtenheft_MVP.md
-    030_Technical_Design.md
-    040_Database_Design.md
+SASD-Freelancer-LaunchPad/
+│
+├── src/
+│   ├── SASD.FreelancerLaunchPad.Domain/
+│   ├── SASD.FreelancerLaunchPad.Application/
+│   ├── SASD.FreelancerLaunchPad.Infrastructure/
+│   └── SASD.FreelancerLaunchPad.WinForms/
+│
+├── tests/
+│   ├── SASD.FreelancerLaunchPad.Domain.Tests/
+│   ├── SASD.FreelancerLaunchPad.Application.Tests/
+│   ├── SASD.FreelancerLaunchPad.Infrastructure.Tests/
+│   └── SASD.FreelancerLaunchPad.Architecture.Tests/
+│
+├── database/
+│   └── migrations/
+│
+├── docs/
+│   ├── 010_Lastenheft.md
+│   ├── 020_Pflichtenheft_MVP.md
+│   ├── 030_Technical_Design.md
+│   ├── 040_Database_Design.md
+│   ├── 045_Competitive_Product_Feature_Inventory.md
+│   └── 050_Architecture.md
+│
+└── SASD.FreelancerLaunchPad.sln
 ```
 
 ---
 
-# 5. Projektverantwortung pro Assembly
+## 2.2 Keine leeren Zukunftsprojekte
 
-## 5.1 SASD.FreelancerLaunchPad.App
+**TD-004**
 
-Dieses Projekt enthält die Windows-Forms-Oberfläche.
+Für noch nicht implementierte Bereiche wird zunächst **kein leeres `Integrations`-, `Analytics`- oder `Discovery`-Projekt** angelegt.
 
-Aufgaben:
-
-- Start der Anwendung
-- Hauptfenster
-- Projektliste
-- Projekteditor
-- Such- und Filteroberfläche
-- Benutzerinteraktion
-- Anzeige von Statusmeldungen
-
-Dieses Projekt darf UI-spezifische Logik enthalten, aber keine SQL-Details und keine direkte Datenbanklogik.
-
-## 5.2 SASD.FreelancerLaunchPad.Core
-
-Dieses Projekt enthält die fachlichen Modelle und Geschäftslogik.
-
-Aufgaben:
-
-- Domänenmodelle
-- Enums
-- Validierungslogik
-- fachliche Services
-- einfache Such-/Filtermodelle
-- zentrale Geschäftsregeln
-
-Beispiele:
-
-- `Project`
-- `Platform`
-- `Skill`
-- `ProjectNote`
-- `ProjectStatus`
-- `ProjectSearchCriteria`
-
-## 5.3 SASD.FreelancerLaunchPad.Data
-
-Dieses Projekt enthält die Datenzugriffsschicht.
-
-Aufgaben:
-
-- SQLite-Verbindung
-- Repository-Klassen
-- Datenbankinitialisierung
-- einfache Migrationen
-- Mapping zwischen SQLite und Core-Modellen
-
-Beispiele:
-
-- `DatabaseInitializer`
-- `ProjectRepository`
-- `PlatformRepository`
-- `SkillRepository`
-- `SqliteConnectionFactory`
-
-## 5.4 SASD.FreelancerLaunchPad.Import
-
-Dieses Projekt ist für spätere Importfunktionen reserviert.
-
-Im MVP bleibt es entweder leer oder enthält nur Platzhalter/Interfaces.
-
-Mögliche spätere Aufgaben:
-
-- CSV-Import
-- JSON-Import
-- manuelle Textanalyse
-- Feed-Import
-- externe Plattform-Importe
-
-Automatisiertes Scraping gehört NICHT zur MVP-Version.
-
-## 5.5 SASD.FreelancerLaunchPad.Tests
-
-Dieses Projekt enthält automatisierte Tests.
-
-Im MVP reichen einfache Tests für:
-
-- Validierungen
-- Statuslogik
-- Repository-Funktionen
-- Datenbankinitialisierung
-
----
-
-# 6. Schichtenmodell
-
-Die Anwendung folgt einem einfachen Schichtenmodell:
+Wenn der erste reale Plattformadapter entwickelt wird, kann beispielsweise ergänzt werden:
 
 ```text
-Windows Forms UI
-      ↓
-Application Services / Core Services
-      ↓
-Repositories
-      ↓
-SQLite
+SASD.FreelancerLaunchPad.Integrations
 ```
 
-## 6.1 UI-Schicht
-
-Die UI-Schicht zeigt Daten an und nimmt Benutzereingaben entgegen.
-
-Sie soll:
-
-- keine SQL-Statements enthalten
-- keine Datenbankverbindungen direkt öffnen
-- keine komplexe Geschäftslogik enthalten
-
-## 6.2 Core-Schicht
-
-Die Core-Schicht enthält die fachliche Bedeutung der Anwendung.
-
-Sie soll:
-
-- unabhängig von Windows Forms bleiben
-- unabhängig von SQLite bleiben
-- später auch für andere UIs verwendbar sein
-
-## 6.3 Data-Schicht
-
-Die Data-Schicht kapselt den Zugriff auf SQLite.
-
-Sie soll:
-
-- SQL zentral halten
-- Datenbankdetails von UI und Core fernhalten
-- einfache Austauschbarkeit ermöglichen
+Bis dahin existiert keine künstliche Projektleiche.
 
 ---
 
-# 7. Zentrale Domänenobjekte
-
-## 7.1 Project
-
-Ein Projektangebot, das aus einer Freelancer-Plattform oder einer anderen Quelle stammt.
-
-Wichtige Eigenschaften:
-
-- Id
-- PlatformId
-- Title
-- Url
-- Description
-- BudgetAmount
-- HourlyRate
-- Currency
-- PublishedAt
-- CurrentStatus
-- CreatedAt
-- UpdatedAt
-- ArchivedAt
-
-## 7.2 Platform
-
-Beschreibt die Quelle eines Projektangebots.
-
-Beispiele:
-
-- PeoplePerHour
-- Freelancermap
-- Manuelle Quelle
-- Sonstige Plattform
-
-Wichtige Eigenschaften:
-
-- Id
-- Name
-- BaseUrl
-- Notes
-- IsActive
-
-## 7.3 Skill
-
-Ein Skill oder Keyword, das einem Projekt zugeordnet werden kann.
-
-Beispiele:
-
-- Linux
-- PHP
-- MariaDB
-- MySQL
-- REST API
-- Windows Forms
-- Server Migration
-
-## 7.4 ProjectNote
-
-Freie Notiz zu einem Projekt.
-
-Wichtige Eigenschaften:
-
-- Id
-- ProjectId
-- NoteText
-- CreatedAt
-- UpdatedAt
-
-## 7.5 ProjectStatusHistory
-
-Historisiert Statusänderungen.
-
-Wichtige Eigenschaften:
-
-- Id
-- ProjectId
-- OldStatus
-- NewStatus
-- ChangedAt
-- Comment
-
----
-
-# 8. Statusmodell
-
-Für den MVP werden folgende Projektstatus definiert:
-
-| Status | Bedeutung |
-|---|---|
-| Neu | Projekt wurde erfasst, aber noch nicht bewertet |
-| Interessant | Projekt wirkt grundsätzlich passend |
-| Beobachten | Projekt soll weiter verfolgt werden |
-| Beworben | Eine Bewerbung wurde gesendet |
-| Abgelehnt | Projekt wird nicht weiter verfolgt |
-| Zuschlag erhalten | Der Auftrag wurde gewonnen |
-| Archiviert | Projekt ist erledigt oder nicht mehr relevant |
-
-Statusänderungen sollen in der Tabelle `project_status_history` dokumentiert werden.
-
----
-
-# 9. Datenbankstrategie
-
-## 9.1 SQLite als lokale Datenbank
-
-SQLite ist für den MVP geeignet, weil:
-
-- keine Serverinstallation erforderlich ist
-- die Datenbank als Datei vorliegt
-- Backups einfach sind
-- lokale Desktop-Anwendungen gut unterstützt werden
-
-## 9.2 Speicherort der Datenbank
-
-Für die Entwicklung kann die Datenbank zunächst im lokalen Projekt- oder App-Verzeichnis liegen.
-
-Später sollte sie unterhalb eines Benutzerverzeichnisses abgelegt werden, z. B.:
+## 2.3 Projektabhängigkeiten
 
 ```text
-%APPDATA%\SASD\FreelancerLaunchPad\freelancer_launchpad.db
+Domain
+  ↑
+Application
+  ↑
+WinForms
+
+Application
+  ↑
+Infrastructure
 ```
 
-Für den MVP ist wichtig, dass der Speicherort klar dokumentiert ist.
-
-## 9.3 Migrationen
-
-Für den MVP wird eine einfache SQL-Datei verwendet:
+Genauer:
 
 ```text
-database/001_create_initial_schema.sql
-```
+Domain
+  keine Projektabhängigkeit
 
-Spätere Migrationen können nummeriert ergänzt werden:
+Application
+  → Domain
 
-```text
-database/002_add_project_rating.sql
-database/003_add_import_runs.sql
+Infrastructure
+  → Application
+  → Domain
+
+WinForms
+  → Application
+  → Domain
+  → Infrastructure nur am Composition Root
 ```
 
 ---
 
-# 10. Datenzugriff
+## 2.4 UI und Infrastructure
 
-## 10.1 Repository Pattern
+**TD-005**
 
-Der Zugriff auf Daten erfolgt über Repository-Klassen.
+`WinForms` darf die konkrete `Infrastructure`-Assembly ausschließlich für:
+
+- Composition Root,
+- DI-Registrierung,
+- Host-Aufbau
+
+referenzieren.
+
+Formulare und Presenter dürfen nicht direkt konkrete SQLite-Repositories verwenden.
+
+---
+
+# 3. Namespace-Konvention
+
+## 3.1 Root Namespace
+
+Der bestehende Produktname wird beibehalten:
+
+```text
+SASD.FreelancerLaunchPad
+```
+
+---
+
+## 3.2 Domain
 
 Beispiele:
 
-- `IProjectRepository`
-- `ProjectRepository`
-- `IPlatformRepository`
-- `PlatformRepository`
-- `ISkillRepository`
-- `SkillRepository`
+```text
+SASD.FreelancerLaunchPad.Domain.Opportunities
+SASD.FreelancerLaunchPad.Domain.Listings
+SASD.FreelancerLaunchPad.Domain.Proposals
+SASD.FreelancerLaunchPad.Domain.Skills
+SASD.FreelancerLaunchPad.Domain.Common
+```
 
-Das Interface liegt in `Core`, die SQLite-Implementierung in `Data`.
+---
 
-## 10.2 Connection Factory
+## 3.3 Application
 
-Eine zentrale Connection Factory stellt SQLite-Verbindungen bereit.
+Beispiele:
+
+```text
+SASD.FreelancerLaunchPad.Application.Opportunities
+SASD.FreelancerLaunchPad.Application.Proposals
+SASD.FreelancerLaunchPad.Application.Search
+SASD.FreelancerLaunchPad.Application.Backup
+SASD.FreelancerLaunchPad.Application.Common
+```
+
+---
+
+## 3.4 Infrastructure
+
+Beispiele:
+
+```text
+SASD.FreelancerLaunchPad.Infrastructure.Sqlite
+SASD.FreelancerLaunchPad.Infrastructure.Repositories
+SASD.FreelancerLaunchPad.Infrastructure.Migrations
+SASD.FreelancerLaunchPad.Infrastructure.Backup
+SASD.FreelancerLaunchPad.Infrastructure.Logging
+```
+
+---
+
+## 3.5 WinForms
+
+Beispiele:
+
+```text
+SASD.FreelancerLaunchPad.WinForms.Views
+SASD.FreelancerLaunchPad.WinForms.Presenters
+SASD.FreelancerLaunchPad.WinForms.Models
+SASD.FreelancerLaunchPad.WinForms.Controls
+SASD.FreelancerLaunchPad.WinForms.Startup
+```
+
+---
+
+# 4. Build-Konfiguration
+
+## 4.1 Gemeinsame Projektoptionen
+
+Empfohlenes `Directory.Build.props`:
+
+```xml
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>
+```
+
+---
+
+## 4.2 Warnungen
+
+**TD-006**
+
+Compiler-Warnungen sollen nicht ignoriert werden.
+
+`TreatWarningsAsErrors` darf zunächst im lokalen Debug-Build deaktiviert bleiben, kann aber in CI schrittweise verschärft werden.
+
+Ziel:
+
+> Keine bekannte Warnung dauerhaft akzeptieren, nur damit der Build grün aussieht.
+
+---
+
+## 4.3 Package-Versionen
+
+Package-Versionen sollen zentral verwaltbar sein.
+
+Ein späteres:
+
+```text
+Directory.Packages.props
+```
+
+ist sinnvoll, sobald mehrere Projekte dieselben Packages referenzieren.
+
+---
+
+# 5. Domain Design
+
+## 5.1 Leitregel
+
+Der Domain Layer enthält fachliche Bedeutung und Invarianten.
+
+Er enthält keine:
+
+- SQL-Statements,
+- Connection Strings,
+- Forms,
+- Controls,
+- MessageBoxes,
+- HTTP-Aufrufe,
+- Plattformparser.
+
+---
+
+## 5.2 Opportunity
+
+Konzeptionelle C#-Form:
+
+```csharp
+public sealed class Opportunity
+{
+    public long Id { get; private set; }
+    public string CanonicalTitle { get; private set; }
+    public OpportunityStatus Status { get; private set; }
+    public bool IsArchived { get; private set; }
+    public DateTimeOffset? ArchivedAtUtc { get; private set; }
+    public string? DismissReason { get; private set; }
+    public string? EndClientName { get; private set; }
+    public DateTimeOffset CreatedAtUtc { get; private set; }
+    public DateTimeOffset UpdatedAtUtc { get; private set; }
+}
+```
+
+Die exakte Implementierung kann davon abweichen.
+
+---
+
+## 5.3 Opportunity Status
+
+```csharp
+public enum OpportunityStatus
+{
+    New,
+    Reviewing,
+    Interesting,
+    Watching,
+    Dismissed,
+    Closed,
+    Cancelled,
+    Expired
+}
+```
+
+**TD-007**
+
+`Archived`, `Applied`, `Rejected` und `Won` gehören nicht in dieses Enum.
+
+---
+
+## 5.4 Listing
+
+Ein Listing enthält source-spezifische Informationen.
+
+Konzeptionell:
+
+```csharp
+public sealed class Listing
+{
+    public long Id { get; private set; }
+    public long OpportunityId { get; private set; }
+    public long PlatformId { get; private set; }
+
+    public string SourceTitle { get; private set; }
+    public string? ExternalId { get; private set; }
+    public Uri? SourceUrl { get; private set; }
+    public string? OriginalDescription { get; private set; }
+
+    public DateTimeOffset? PublishedAtUtc { get; private set; }
+    public DateTimeOffset FirstObservedAtUtc { get; private set; }
+    public DateTimeOffset CapturedAtUtc { get; private set; }
+    public DateTimeOffset LastObservedAtUtc { get; private set; }
+
+    public CaptureMethod CaptureMethod { get; private set; }
+}
+```
+
+---
+
+## 5.5 Opportunity vs. Listing
+
+**TD-008**
+
+Ein externes `ExternalId`, eine URL oder eine Plattform-ID darf niemals als Opportunity-ID missverstanden werden.
+
+Opportunity besitzt eine eigene lokale ID.
+
+Listing besitzt eine eigene lokale ID.
+
+---
+
+## 5.6 Platform
+
+```csharp
+public sealed class Platform
+{
+    public long Id { get; init; }
+    public string Key { get; init; }
+    public string DisplayName { get; init; }
+    public Uri? BaseUri { get; init; }
+    public bool IsActive { get; init; }
+}
+```
+
+`Key` ist ein stabiler technischer Schlüssel.
+
+Beispiele:
+
+```text
+freelancermap
+peopleperhour
+randstad-professional-gulp
+```
+
+---
+
+## 5.7 Capture Method
+
+```csharp
+public enum CaptureMethod
+{
+    Manual,
+    Paste,
+    Url,
+    BrowserHelper,
+    Api
+}
+```
+
+Im MVP wird nur `Manual` aktiv verwendet.
+
+---
+
+# 6. Money- und Rate-Modell
+
+## 6.1 Domain-Wert
+
+**TD-009**
+
+Geld-/Ratewerte werden im Domain-Code als `decimal` behandelt.
+
+Keine fachliche Geldrechnung verwendet `double` oder `float`.
+
+---
+
+## 6.2 Currency Code
+
+Währungen werden als ISO-artiger dreistelliger Code gespeichert.
+
+Beispiele:
+
+```text
+EUR
+GBP
+USD
+CHF
+```
+
+Der MVP benötigt keine Wechselkursdatenbank.
+
+---
+
+## 6.3 Price Range
+
+Für ausgeschriebene Werte ist ein Range-Modell sinnvoll:
+
+```csharp
+public readonly record struct AmountRange(
+    decimal? Minimum,
+    decimal? Maximum,
+    string CurrencyCode);
+```
+
+Regeln:
+
+- mindestens Minimum oder Maximum gesetzt,
+- kein Wert negativ,
+- wenn beide gesetzt: Minimum <= Maximum.
+
+---
+
+## 6.4 Getrennte Konditionen
+
+Listing hält getrennt:
+
+- Fixed Budget Range,
+- Hourly Rate Range,
+- Daily Rate Range.
+
+Proposal hält getrennt:
+
+- Own Fixed Price,
+- Own Hourly Rate,
+- Own Daily Rate.
+
+---
+
+## 6.5 Keine Konvertierung
+
+**TD-010**
+
+Es existiert im MVP kein Service, der:
+
+```text
+Daily → Hourly
+Fixed → Hourly
+Hourly → Daily
+```
+
+automatisch umrechnet.
+
+Spätere Ableitungen benötigen eine explizite Annahme.
+
+---
+
+# 7. Zeitmodell
+
+## 7.1 Interner Typ
+
+**TD-011**
+
+Für echte Zeitpunkte wird im C#-Code `DateTimeOffset` verwendet.
+
+Persistierte Domain-Zeitpunkte müssen Offset `+00:00` besitzen.
+
+---
+
+## 7.2 Date-only-Werte
+
+Nicht jeder fachliche Wert ist ein Zeitpunkt.
 
 Beispiel:
 
 ```text
-SqliteConnectionFactory
+ExpectedStartDate = 2026-09-15
 ```
 
-Aufgaben:
+ist ein Kalendertag und kann als `DateOnly` modelliert werden.
 
-- Connection String verwalten
-- neue Verbindungen erzeugen
-- Speicherort der Datenbank kapseln
-
-## 10.3 Kein direkter SQL-Code in der UI
-
-SQL wird ausschließlich in der Data-Schicht verwendet.
+Ein `DateOnly` wird nicht künstlich auf Mitternacht UTC umgerechnet.
 
 ---
 
-# 11. Benutzeroberfläche
+## 7.3 IClock
 
-## 11.1 Hauptfenster
+```csharp
+public interface IClock
+{
+    DateTimeOffset UtcNow { get; }
+}
+```
 
-Das Hauptfenster ist der zentrale Arbeitsbereich.
+Produktive Implementierung:
 
-Es enthält:
+```text
+SystemClock
+```
 
-- Projektliste
-- Suchfeld
-- Statusfilter
-- Plattformfilter
-- Schaltflächen für Neu/Bearbeiten/Löschen/Archivieren
-- Statusleiste
+Testimplementierung:
 
-## 11.2 Projektliste
-
-Die Projektliste wird als `DataGridView` umgesetzt.
-
-Geplante Spalten:
-
-- Status
-- Plattform
-- Titel
-- Budget
-- Stundensatz
-- Währung
-- Veröffentlichungsdatum
-- Aktualisiert am
-
-## 11.3 Projekteditor
-
-Der Projekteditor wird als separates Formular umgesetzt.
-
-Felder:
-
-- Plattform
-- Titel
-- URL
-- Beschreibung
-- Budget
-- Stundensatz
-- Währung
-- Veröffentlichungsdatum
-- Status
-- Skills
-- Notizen
-
-Für den MVP kann die Skill-Eingabe zunächst als kommaseparierter Text erfolgen. Eine komfortable Mehrfachauswahl kann später ergänzt werden.
+```text
+FakeClock
+```
 
 ---
 
-# 12. Validierungsregeln
+## 7.4 Keine verstreuten `DateTime.Now`
 
-## 12.1 Mindestvalidierung
+**TD-012**
 
-Für den MVP gelten folgende Regeln:
-
-- Titel darf nicht leer sein
-- URL darf leer sein, muss aber bei Eingabe grundsätzlich plausibel sein
-- Budget darf nicht negativ sein
-- Stundensatz darf nicht negativ sein
-- Plattform muss gesetzt sein
-- Status muss gesetzt sein
-
-## 12.2 Fehleranzeige
-
-Validierungsfehler werden dem Benutzer im Formular angezeigt.
-
-Für den MVP reicht eine einfache MessageBox oder ein Fehlerlabel.
+Application- und Domain-Code darf für fachlich relevante Zeitstempel nicht beliebig `DateTime.Now` aufrufen.
 
 ---
 
-# 13. Fehlerbehandlung
+# 8. Proposal Design
 
-## 13.1 Grundprinzip
+## 8.1 Proposal
 
-Fehler sollen verständlich und kontrolliert behandelt werden.
+Konzeptionell:
 
-Die Anwendung soll nicht kommentarlos abstürzen.
+```csharp
+public sealed class Proposal
+{
+    public long Id { get; private set; }
+    public long OpportunityId { get; private set; }
+    public long? ListingId { get; private set; }
 
-## 13.2 MVP-Fehlerfälle
+    public DateTimeOffset SubmittedAtUtc { get; private set; }
+    public ProposalState State { get; private set; }
+    public ProposalOutcome? Outcome { get; private set; }
 
-Zu behandeln sind mindestens:
-
-- Datenbankdatei nicht erreichbar
-- Datenbankinitialisierung schlägt fehl
-- Speichern eines Projekts schlägt fehl
-- ungültige Benutzereingaben
-- unerwartete Datenbankfehler
-
-## 13.3 Logging
-
-Für den MVP reicht zunächst eine einfache Debug-Ausgabe oder spätere lokale Logdatei.
-
-Ein vollständiges Logging-Framework ist für den MVP nicht notwendig.
+    public string? CvProfileVersion { get; private set; }
+    public string? NoteText { get; private set; }
+}
+```
 
 ---
 
-# 14. Konfiguration
+## 8.2 Proposal State
 
-## 14.1 MVP-Konfiguration
-
-Für den MVP sollen nur sehr wenige Konfigurationen notwendig sein.
-
-Mögliche Einstellungen:
-
-- Datenbankpfad
-- Standardplattform
-- Standardwährung
-
-Diese Einstellungen können zunächst fest im Code oder in einer einfachen Konfigurationsdatei verwaltet werden.
-
-## 14.2 Spätere Konfiguration
-
-Spätere Versionen können eine Benutzeroberfläche für Einstellungen erhalten.
+```csharp
+public enum ProposalState
+{
+    Submitted,
+    AwaitingResponse,
+    Closed
+}
+```
 
 ---
 
-# 15. Sicherheit
+## 8.3 Proposal Outcome
 
-## 15.1 Lokale Anwendung
-
-Da die Anwendung lokal arbeitet, ist der Angriffsraum im MVP begrenzt.
-
-Trotzdem gelten folgende Grundsätze:
-
-- keine unnötige Speicherung sensibler Daten
-- keine Passwörter speichern
-- keine Login-Daten für Plattformen speichern
-- keine automatische Anmeldung an externen Plattformen
-
-## 15.2 Externe Plattformen
-
-Im MVP gibt es keine automatische Kommunikation mit PeoplePerHour oder anderen Plattformen.
-
-Damit werden rechtliche und technische Risiken reduziert.
+```csharp
+public enum ProposalOutcome
+{
+    Won,
+    Rejected,
+    Withdrawn,
+    TimedOutByUser,
+    Unknown
+}
+```
 
 ---
 
-# 16. Datenschutz
+## 8.4 Invariante
 
-## 16.1 Personenbezogene Daten
+**TD-013**
 
-Die Anwendung soll im MVP keine personenbezogenen Kundendaten erfassen müssen.
+Wenn `State != Closed`, muss `Outcome == null` sein.
 
-Falls Projekttexte personenbezogene Daten enthalten, liegt die Verantwortung beim Benutzer, diese Daten bewusst zu speichern.
-
-## 16.2 Lokale Kontrolle
-
-Alle Daten bleiben lokal auf dem Rechner des Benutzers.
+Wenn `State == Closed`, muss ein terminales Outcome vorliegen.
 
 ---
 
-# 17. Testkonzept
+## 8.5 Listing-Verweis
 
-## 17.1 Manuelle Tests
+**TD-014**
 
-Mindesttests:
+`ListingId` ist optional.
 
-- Anwendung startet
-- Datenbank wird erstellt
-- Projekt kann angelegt werden
-- Projekt kann bearbeitet werden
-- Projekt kann gelöscht oder archiviert werden
-- Suche funktioniert
-- Filter funktionieren
-- Daten bleiben nach Neustart erhalten
+Wenn gesetzt, muss das Listing zur gleichen Opportunity gehören.
 
-## 17.2 Automatisierte Tests
-
-Frühe automatisierte Tests sollten prüfen:
-
-- Validierung von Projektdaten
-- Statuswechsel
-- Repository-Speichern
-- Repository-Laden
-- Datenbankinitialisierung
+Diese Regel wird sowohl Application-seitig als auch durch die Datenbank abgesichert.
 
 ---
 
-# 18. Entwicklungsmeilensteine
+# 9. Skills und Notes
 
-## 18.1 Meilenstein 1 – Solution und Datenbankbasis
+## 9.1 Skill
 
-Ergebnis:
+Skills werden normalisiert.
 
-- Solution existiert
-- Projekte sind angelegt
-- Datenbankinitialisierung funktioniert
-- Tabellen werden erstellt
+MVP-Normalisierung:
 
-## 18.2 Meilenstein 2 – Projektliste
+```text
+trim
+Unicode normalisieren
+case-insensitive Vergleich
+mehrfache Leerzeichen reduzieren
+```
 
-Ergebnis:
+Nicht Bestandteil:
 
-- App startet
-- Projektliste wird angezeigt
-- vorhandene Projekte werden geladen
-
-## 18.3 Meilenstein 3 – Projekteditor
-
-Ergebnis:
-
-- neues Projekt anlegen
-- Projekt bearbeiten
-- Projekt speichern
-
-## 18.4 Meilenstein 4 – Suche, Filter, Notizen
-
-Ergebnis:
-
-- Suchfeld funktioniert
-- Statusfilter funktioniert
-- Notizen können gepflegt werden
-
-## 18.5 Meilenstein 5 – Erste nutzbare V0.1
-
-Ergebnis:
-
-- App ist für echte Projektbeobachtung nutzbar
-- Daten bleiben erhalten
-- Grundbedienung ist stabil
+- Alias-Graph,
+- Taxonomie,
+- Skill-Hierarchie.
 
 ---
 
-# 19. Erweiterungspunkte
+## 9.2 Notes
 
-Spätere Erweiterungspunkte:
+**TD-015**
 
-- CSV-Import
-- JSON-Import
-- Feed-Import
-- Budgetanalyse
-- Skill-Häufigkeiten
-- Proposal-Verwaltung
-- Vorlagenverwaltung
-- einfache Diagramme
-- Exportfunktionen
-- Backup/Restore-Dialog
-- Installer
+Notes werden als eigene persistente Datensätze geführt.
 
-Diese Erweiterungen dürfen die MVP-Entwicklung nicht verzögern.
+Begründung:
+
+- der alte Prototyp besitzt bereits mehrere `project_notes`,
+- spätere mehrere Notes sind ohnehin vorgesehen,
+- dadurch ist keine verlustbehaftete Zusammenfassung alter Notes nötig.
+
+Die MVP-UI darf trotzdem eine einfache Darstellung anbieten.
 
 ---
 
-# 20. Architekturentscheidungen
+## 9.3 Note ≠ Activity
 
-## 20.1 Windows Forms statt WPF
-
-Windows Forms wird gewählt, weil:
-
-- schnelle Umsetzung möglich ist
-- der Benutzer konkrete schnelle Nutzbarkeit wünscht
-- Visual Studio gute Designer-Unterstützung bietet
-- die UI-Anforderungen im MVP überschaubar sind
-
-## 20.2 SQLite statt SQL Server
-
-SQLite wird gewählt, weil:
-
-- keine Installation eines Datenbankservers notwendig ist
-- lokale Speicherung genügt
-- die Datenbank einfach kopierbar ist
-- der MVP dadurch schneller umsetzbar ist
-
-## 20.3 Manuelle Erfassung statt Scraping
-
-Manuelle Erfassung wird gewählt, weil:
-
-- sie sofort nutzbar ist
-- sie rechtlich risikoärmer ist
-- sie technisch stabiler ist
-- sie die MVP-Entwicklung stark beschleunigt
-
-## 20.4 Kleine Architektur statt Großsystem
-
-Die Anwendung soll bewusst keine überladene Enterprise-Architektur erhalten.
-
-Die Struktur soll helfen, nicht bremsen.
+Keine Note implementiert ein Activity-Interface oder wird als Activity-Type gespeichert.
 
 ---
 
-# 21. Offene Punkte
+# 10. Statushistorie
 
-Vor der Implementierung oder während der ersten Iteration zu klären:
+## 10.1 Entscheidung
 
-- exakte .NET-10-Projektvorlagen in Visual Studio
-- Wahl von xUnit oder MSTest
-- finaler Speicherort der SQLite-Datenbank
-- genaue Benennung der Statuswerte im UI
-- erste Standardplattformen
-- Standardwährung
-- Umgang mit archivierten Projekten in der Liste
+**TD-016**
 
-Diese Punkte blockieren den MVP nicht.
+Opportunity-Statusänderungen werden weiterhin historisiert.
+
+Begründung:
+
+- existiert bereits im Prototyp,
+- ist entscheidungsrelevant,
+- kostet wenig Komplexität,
+- liefert später wertvolle Funnel-/Workflow-Daten.
 
 ---
 
-# 22. Zusammenfassung
+## 10.2 Nicht als Event Sourcing
 
-Das Technical Design beschreibt eine kleine, robuste und verständliche Windows-Desktop-Anwendung auf Basis von C#, .NET 10, Windows Forms und SQLite.
+Die Tabelle ist eine gezielte Historie.
 
-Die Architektur ist bewusst einfach gehalten, trennt aber UI, Fachlogik und Datenzugriff sauber genug, um spätere Erweiterungen zu ermöglichen.
+Sie ist nicht die Quelle, aus der jede Opportunity rekonstruiert werden muss.
 
-Das wichtigste Ziel bleibt:
+Der aktuelle Status bleibt im Opportunity-Datensatz gespeichert.
 
-> Eine App, die schnell echten Nutzen bringt, statt eine perfekte Anwendung, die zu spät fertig wird.
+---
+
+# 11. Application Layer
+
+## 11.1 Use Cases
+
+Der Application Layer enthält explizite Use Cases.
+
+MVP-Kandidaten:
+
+```text
+CreateOpportunity
+UpdateOpportunity
+GetOpportunity
+SearchOpportunities
+ChangeOpportunityStatus
+ArchiveOpportunity
+RestoreOpportunity
+DeleteOpportunity
+
+AddOpportunityNote
+UpdateOpportunityNote
+DeleteOpportunityNote
+
+SetOpportunitySkills
+
+CreateProposal
+UpdateProposal
+CloseProposal
+
+CreateBackup
+OpenSourceUrl
+```
+
+---
+
+## 11.2 Request-/Result-Modelle
+
+UI-Formulare sollen Domain-Entitäten nicht direkt beliebig mutieren.
+
+Beispiel:
+
+```csharp
+public sealed record CreateOpportunityRequest(
+    string CanonicalTitle,
+    CreateListingRequest Listing,
+    IReadOnlyList<string> Skills,
+    string? NoteText);
+```
+
+---
+
+## 11.3 Result Pattern
+
+**TD-017**
+
+Erwartbare Fehler werden als explizite Ergebnisse zurückgegeben.
+
+Beispiele:
+
+- Validation Failed,
+- Duplicate Listing,
+- Not Found,
+- Conflict.
+
+Unerwartete technische Fehler bleiben Exceptions und werden an einer zentralen Grenze protokolliert.
+
+---
+
+## 11.4 Keine Exception als normale Validierung
+
+Ein leerer Titel ist kein „unerwarteter Systemfehler“.
+
+Er wird als Validation Error behandelt.
+
+---
+
+# 12. Ports
+
+## 12.1 Repository Ports
+
+Konkrete MVP-Ports:
+
+```csharp
+public interface IOpportunityRepository { ... }
+public interface IProposalRepository { ... }
+public interface IPlatformRepository { ... }
+public interface ISkillRepository { ... }
+```
+
+Notes und Listings können zunächst über das Opportunity Repository bzw. gezielte Ports verwaltet werden.
+
+---
+
+## 12.2 Keine generische IRepository<T>
+
+**TD-018**
+
+Es wird kein generisches:
+
+```csharp
+IRepository<T>
+```
+
+als zentrales Architekturmodell eingeführt.
+
+Repositories sollen fachliche Abfragen ausdrücken.
+
+---
+
+## 12.3 Weitere Ports
+
+```text
+IClock
+IBackupService
+IAppPaths
+IBrowserLauncher
+```
+
+Später:
+
+```text
+IDiscoveryCapability
+ICaptureCapability
+IObservationCapability
+ICredentialStore
+```
+
+---
+
+# 13. Infrastructure Layer
+
+## 13.1 SqliteConnectionFactory
+
+Zentrale Verantwortung:
+
+- Connection String,
+- `PRAGMA foreign_keys = ON`,
+- `busy_timeout`,
+- Verbindungserzeugung.
+
+---
+
+## 13.2 Verbindung pro Operation
+
+**TD-019**
+
+Repositories sollen keine langlebige globale SQLite-Connection halten.
+
+Bevorzugt:
+
+> kurze Connection-Lebensdauer pro Use Case / Transaktion.
+
+---
+
+## 13.3 PRAGMA-Konfiguration
+
+Für produktive Verbindungen vorgesehen:
+
+```sql
+PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;
+```
+
+Für die Datenbankinitialisierung kann zusätzlich gesetzt werden:
+
+```sql
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+```
+
+Die finale Wahl wird im Database Design dokumentiert.
+
+---
+
+# 14. Migration Runner
+
+## 14.1 Migrationen
+
+Migrationen werden nummeriert.
+
+Beispiel:
+
+```text
+database/migrations/
+  001_legacy_initial_schema.sql
+  002_opportunity_listing_model.sql
+  003_proposal_lite.sql
+```
+
+Die genaue Nummerierung wird an den tatsächlich vorhandenen Repository-Stand angepasst.
+
+---
+
+## 14.2 Checksum
+
+**TD-020**
+
+Eine bereits angewendete Migration darf nicht nachträglich still verändert werden.
+
+`schema_migrations` speichert deshalb zusätzlich einen Checksum-Wert.
+
+---
+
+## 14.3 Transaktion
+
+Migrationen werden soweit SQLite-technisch möglich atomar ausgeführt.
+
+---
+
+## 14.4 Backup vor Legacy-Migration
+
+**TD-021**
+
+Bevor eine vorhandene `projects`-Datenbank auf das neue Opportunity/Listing-Modell migriert wird, muss automatisch eine Sicherung des Altstands erzeugt werden.
+
+---
+
+# 15. Legacy-Migration
+
+## 15.1 Grundidee
+
+Alt:
+
+```text
+FreelanceProject
+  Platform
+  URL
+  Description
+  Status
+  Budget/Rate
+```
+
+Neu:
+
+```text
+Opportunity
+  ├── Listing
+  ├── Notes
+  ├── Skills
+  └── optional Proposal
+```
+
+---
+
+## 15.2 ID-Strategie
+
+**TD-022**
+
+Interne IDs bleiben für den Desktop-MVP 64-Bit-Integer (`long` / SQLite `INTEGER`).
+
+Begründung:
+
+- vorhandener Prototyp nutzt `long`,
+- Migration kann Projekt-ID als Opportunity-ID erhalten,
+- lokale Einzelanwenderdatenbank,
+- keine aktuelle Multi-Device-Merge-Anforderung,
+- weniger künstliche Komplexität.
+
+Falls später globale IDs benötigt werden, können zusätzliche öffentliche IDs eingeführt werden.
+
+---
+
+## 15.3 Statusmigration
+
+Empfohlene Semantik:
+
+| Legacy Status | Neue Abbildung |
+|---|---|
+| `New` | Opportunity `New` |
+| `Interesting` | Opportunity `Interesting` |
+| `Watching` | Opportunity `Watching` |
+| `Applied` | Opportunity `Interesting` + Proposal |
+| `Rejected` ohne vorheriges `Applied` | Opportunity `Dismissed` |
+| `Rejected` nach `Applied` | Opportunity `Closed` + Proposal `Rejected` |
+| `Won` | Opportunity `Closed` + Proposal `Won` |
+| `Archived` | archiviert; vorherigen fachlichen Status aus History rekonstruieren |
+
+---
+
+## 15.4 Ambiguität
+
+**TD-023**
+
+Wenn der Legacy-Status nicht eindeutig migrierbar ist, darf die Migration keine falsche Wahrheit erfinden.
+
+Sie muss:
+
+- einen sicheren Default wählen,
+- eine Warnung protokollieren,
+- im Migrationsreport auf den Datensatz hinweisen.
+
+---
+
+## 15.5 Legacy Notes
+
+Alle vorhandenen `project_notes` werden zu `opportunity_notes`.
+
+Keine Textnotiz wird verworfen.
+
+---
+
+## 15.6 Legacy Skills
+
+`project_skills` wird zu `opportunity_skills`.
+
+---
+
+# 16. Datenbankpfad
+
+## 16.1 Produktionspfad
+
+Standard:
+
+```text
+%LOCALAPPDATA%\SASD\FreelancerLaunchPad\freelancer_launchpad.db
+```
+
+---
+
+## 16.2 Warum LOCALAPPDATA
+
+**TD-024**
+
+Die aktive Datenbank ist Anwendungszustand und nicht primär ein roamingfähiges Dokument.
+
+`LOCALAPPDATA` ist deshalb gegenüber `APPDATA` vorzuziehen.
+
+---
+
+## 16.3 Entwicklungs-/Testpfade
+
+Tests dürfen niemals die produktive Benutzerdatenbank verwenden.
+
+Infrastructure Tests erhalten pro Test bzw. Testklasse eine isolierte temporäre Datenbank.
+
+---
+
+# 17. Backup Design
+
+## 17.1 Backup ist kein Datei-Copy bei offener WAL-Datenbank
+
+**TD-025**
+
+Die produktive Backup-Funktion darf nicht einfach blind die geöffnete `.db`-Datei kopieren.
+
+---
+
+## 17.2 Konsistenter Snapshot
+
+Bevorzugt wird die SQLite-Backup-Funktion über `SqliteConnection`.
+
+Ablauf:
+
+```text
+aktive DB
+  ↓
+SQLite Backup API
+  ↓
+temporäre Snapshot-DB
+  ↓
+optional ZIP + Manifest
+  ↓
+Zieldatei
+```
+
+---
+
+## 17.3 Backup-Paket
+
+Für den MVP darf das Backup-Paket enthalten:
+
+```text
+freelancer_launchpad.db
+manifest.json
+```
+
+Manifest:
+
+```json
+{
+  "product": "SASD Freelancer LaunchPad",
+  "createdAtUtc": "...",
+  "schemaVersion": 2,
+  "applicationVersion": "..."
+}
+```
+
+---
+
+## 17.4 Verschlüsselung
+
+Keine integrierte Backup-Verschlüsselung im MVP.
+
+Der Benutzer ist für das Zielmedium verantwortlich.
+
+---
+
+# 18. Logging
+
+## 18.1 Logging-Abstraktion
+
+Anwendungscode verwendet `ILogger<T>`.
+
+---
+
+## 18.2 Lokale Datei
+
+Der produktive Desktop-Stand soll ein einfaches lokales Rolling-File-Logging erhalten.
+
+Der konkrete Provider darf im Implementierungsschritt gewählt werden.
+
+---
+
+## 18.3 Logpfad
+
+Vorgesehen:
+
+```text
+%LOCALAPPDATA%\SASD\FreelancerLaunchPad\logs\
+```
+
+---
+
+## 18.4 Keine sensiblen Volltexte
+
+**TD-026**
+
+Nicht standardmäßig loggen:
+
+- vollständige Ausschreibungen,
+- Proposal-Texte,
+- Notes,
+- Tokens,
+- Credentials.
+
+---
+
+# 19. Fehlerbehandlung
+
+## 19.1 Fehlerklassen
+
+Technisch unterschieden werden:
+
+```text
+Validation
+NotFound
+Conflict
+Persistence
+Migration
+Backup
+ExternalIntegration
+Unexpected
+```
+
+---
+
+## 19.2 UI
+
+Die UI erhält verständliche Meldungen.
+
+Beispiel:
+
+> „Die Opportunity konnte nicht gespeichert werden. Die lokalen Daten wurden nicht verändert.“
+
+Technische Details gehören ins Log.
+
+---
+
+## 19.3 Globaler Fehlerhandler
+
+**TD-027**
+
+Unerwartete Exceptions auf der UI-Grenze werden zentral abgefangen und protokolliert.
+
+Keine leeren `catch`-Blöcke.
+
+---
+
+# 20. Windows Forms Design
+
+## 20.1 Hauptfenster
+
+Der MVP-Hauptscreen besteht konzeptionell aus:
+
+1. Menü/Toolbar,
+2. Such- und Filterbereich,
+3. Opportunity-Liste,
+4. kompakter Detailbereich bzw. Detailaktion,
+5. Statusleiste.
+
+---
+
+## 20.2 1280×720
+
+**TD-028**
+
+Die Oberfläche muss bei 1280×720 ohne horizontales „Formular-Chaos“ nutzbar bleiben.
+
+Daher:
+
+- keine übergroßen festen Dialoge,
+- Scrollcontainer für lange Editoren,
+- SplitContainer bzw. adaptive Bereiche,
+- wichtige Aktionen bleiben sichtbar,
+- sekundäre Informationen werden gruppiert.
+
+---
+
+## 20.3 Opportunity-Liste
+
+`DataGridView` bleibt für den MVP geeignet.
+
+Spaltenvorschlag:
+
+```text
+Status
+Archiv
+Titel
+Plattform
+Published
+Remote
+Rate/Budget kompakt
+Skills kompakt
+Updated
+```
+
+---
+
+## 20.4 Mehrere Listings
+
+Die Listenansicht zeigt zunächst einen Primary-/aktuellen Listing-Kontext.
+
+**TD-029**
+
+Die UI darf mehrere Listings nicht fachlich wegmodellieren.
+
+Wenn später mehrere existieren, erscheint in der Detailansicht eine Listing-Sektion.
+
+---
+
+## 20.5 Opportunity Editor
+
+Tabs/Abschnitte:
+
+```text
+Allgemein
+Fundstelle
+Konditionen
+Skills
+Notes
+Proposal
+```
+
+Für 1280×720 sind Abschnitte oder Tabs besser als ein extrem langer Dialog.
+
+---
+
+# 21. Presenter Design
+
+## 21.1 Keine SQL-Logik im Form
+
+Forms kennen nur Presenter/Application Contracts.
+
+---
+
+## 21.2 Beispiel
+
+```text
+MainForm
+  ↕
+OpportunityListPresenter
+  ↓
+SearchOpportunitiesUseCase
+```
+
+---
+
+## 21.3 Editor
+
+```text
+OpportunityEditForm
+  ↕
+OpportunityEditPresenter
+  ↓
+CreateOpportunity / UpdateOpportunity
+```
+
+---
+
+## 21.4 Proposal
+
+```text
+ProposalForm
+  ↕
+ProposalPresenter
+  ↓
+CreateProposal / UpdateProposal / CloseProposal
+```
+
+---
+
+# 22. Suche und Filter
+
+## 22.1 MVP-Suche
+
+MVP nutzt parameterisierte SQL-Abfragen.
+
+Filter:
+
+- Freitext,
+- Plattform,
+- Opportunity-Status,
+- Skill,
+- Published-Zeitraum,
+- Archivstatus.
+
+---
+
+## 22.2 Kein FTS5-Zwang
+
+**TD-030**
+
+SQLite FTS5 wird zunächst nicht benötigt.
+
+Der MVP darf mit `LIKE` / gezielten Joins starten.
+
+FTS5 wird eingeführt, wenn Messdaten oder realer Datenumfang dies rechtfertigen.
+
+---
+
+## 22.3 Query Builder
+
+Keine Stringverkettung aus Benutzereingaben.
+
+Dynamische WHERE-Bedingungen verwenden ausschließlich SQL-Parameter.
+
+---
+
+## 22.4 Freitextfelder
+
+Mindestens durchsucht:
+
+- Opportunity Title,
+- Listing Source Title,
+- Original Description,
+- Notes,
+- Skills.
+
+---
+
+# 23. URL-Behandlung
+
+## 23.1 Original URL
+
+Das Listing speichert die vom Nutzer eingegebene Source URL.
+
+---
+
+## 23.2 Normalized URL
+
+Zusätzlich darf ein normalisierter Vergleichswert gespeichert werden.
+
+Sichere generische Normalisierung:
+
+- trim,
+- absolute URI,
+- scheme/host lowercase,
+- Fragment entfernen,
+- Default-Port normalisieren.
+
+---
+
+## 23.3 Keine aggressive Query-Bereinigung
+
+**TD-031**
+
+Generische URL-Normalisierung darf nicht beliebige Query-Parameter entfernen.
+
+Ein Parameter kann Teil der echten Listing-ID sein.
+
+Plattformspezifische Normalisierung gehört später in den Adapter.
+
+---
+
+# 24. Duplikaterkennung
+
+## 24.1 MVP
+
+Frühe Signale:
+
+```text
+Platform + ExternalId
+Platform + NormalizedUrl
+```
+
+---
+
+## 24.2 Verhalten
+
+Bei sicherem Treffer:
+
+- nicht automatisch doppelt speichern,
+- bestehende Opportunity anzeigen,
+- Benutzer entscheiden lassen.
+
+---
+
+## 24.3 Semantische Ähnlichkeit
+
+Kein MVP.
+
+---
+
+# 25. OpenSource/Browser
+
+## 25.1 BrowserLauncher
+
+Die UI öffnet Source URLs über:
+
+```text
+IBrowserLauncher
+```
+
+Infrastructure nutzt die Windows-Shell.
+
+---
+
+## 25.2 Validierung
+
+Nur absolute `http`/`https` URLs werden aus normalen Listing-Feldern geöffnet.
+
+---
+
+# 26. Startup
+
+## 26.1 Reihenfolge
+
+```text
+Program.Main
+  ↓
+Host bauen
+  ↓
+AppPaths bestimmen
+  ↓
+Logging initialisieren
+  ↓
+DatabaseInitializer
+  ↓
+MigrationRunner
+  ↓
+Seed/Reference Data
+  ↓
+MainForm erzeugen
+  ↓
+Application.Run
+```
+
+---
+
+## 26.2 Migrationfehler
+
+**TD-032**
+
+Wenn die Datenbankmigration fehlschlägt, darf die normale UI nicht so starten, als sei alles in Ordnung.
+
+Stattdessen:
+
+- Fehlermeldung,
+- Logpfad nennen,
+- Originaldaten nicht löschen,
+- Anwendung kontrolliert beenden oder Diagnosemodus anbieten.
+
+---
+
+# 27. Shutdown
+
+## 27.1 Keine langlebigen DB-Verbindungen
+
+Dadurch ist Shutdown einfach.
+
+---
+
+## 27.2 Background Services
+
+Spätere Worker erhalten CancellationToken und werden kontrolliert beendet.
+
+---
+
+# 28. Dependency Injection
+
+## 28.1 Composition Root
+
+Einziger Ort für konkrete Verdrahtung:
+
+```text
+WinForms/Program.cs
+oder
+WinForms/Startup/ServiceRegistration.cs
+```
+
+---
+
+## 28.2 Beispiel
+
+```csharp
+services.AddSingleton<IClock, SystemClock>();
+services.AddSingleton<IAppPaths, WindowsAppPaths>();
+
+services.AddTransient<IOpportunityRepository, SqliteOpportunityRepository>();
+services.AddTransient<IProposalRepository, SqliteProposalRepository>();
+
+services.AddTransient<CreateOpportunityHandler>();
+services.AddTransient<SearchOpportunitiesHandler>();
+
+services.AddTransient<MainForm>();
+```
+
+Konkrete Lifetimes werden bei Implementierung geprüft.
+
+---
+
+# 29. Testdesign
+
+## 29.1 Domain Tests
+
+Prüfen:
+
+- Opportunity Status,
+- Archive/Restore,
+- Money Range,
+- Proposal State/Outcome,
+- `TimedOutByUser`,
+- keine negative Rate,
+- Minimum <= Maximum.
+
+---
+
+## 29.2 Application Tests
+
+Prüfen:
+
+- Create Opportunity + Listing,
+- Duplicate Handling,
+- Proposal belongs to Opportunity,
+- Listing belongs to Opportunity,
+- Statusänderung + History,
+- Backup Use Case mit Fake/Temp Infrastructure.
+
+---
+
+## 29.3 Infrastructure Tests
+
+Mit echter SQLite-Datei:
+
+- Migrationen,
+- FK-Constraints,
+- Unique-Constraints,
+- CRUD,
+- komplexe Suche,
+- Backup-Snapshot,
+- Legacy-Migration.
+
+---
+
+## 29.4 Architecture Tests
+
+**TD-033**
+
+Automatisiert prüfen:
+
+- Domain referenziert kein WinForms,
+- Domain referenziert kein Microsoft.Data.Sqlite,
+- Application referenziert kein WinForms,
+- Application referenziert kein Microsoft.Data.Sqlite,
+- WinForms-Forms enthalten keine direkten SQLiteConnection-Aufrufe.
+
+---
+
+# 30. Testdatenbanken
+
+## 30.1 Isolation
+
+Jeder Test verwendet eine temporäre isolierte Datenbank.
+
+---
+
+## 30.2 Produktivdaten
+
+**TD-034**
+
+Automatisierte Tests dürfen niemals `%LOCALAPPDATA%`-Produktivdaten öffnen.
+
+---
+
+## 30.3 Realistische Seeds
+
+Zusätzlich zu Unit-Tests sind realistische Testdaten sinnvoll:
+
+- mehrere Plattformen,
+- gleiche Opportunity mit zwei Listings,
+- unbekannte Rate,
+- Hourly + Daily getrennt,
+- Proposal TimedOutByUser,
+- archivierte Dismissed Opportunity.
+
+---
+
+# 31. Security
+
+## 31.1 SQL Injection
+
+Alle SQL-Werte werden parametrisiert.
+
+---
+
+## 31.2 Secrets
+
+Keine Plattformpasswörter in:
+
+- DB,
+- config,
+- Log,
+- Source Code.
+
+---
+
+## 31.3 Rohdaten
+
+Importierter Inhalt wird als Daten behandelt, nicht als Code.
+
+---
+
+# 32. Performance
+
+## 32.1 Datenmenge
+
+Der MVP wird für einen Einzelanwender mit typischerweise:
+
+```text
+Hunderte bis einige Zehntausend Opportunities/Listings
+```
+
+ausgelegt.
+
+---
+
+## 32.2 Paging
+
+Paging ist nicht zwingend für die erste kleine Datenbasis.
+
+Die Repository-API soll jedoch später `Limit/Offset` bzw. Paging ergänzen können.
+
+---
+
+## 32.3 Lange Beschreibungen
+
+Listenabfragen sollen Originalbeschreibungen nicht unnötig laden.
+
+Für Grid-Zeilen werden Projektionen/Read Models verwendet.
+
+---
+
+# 33. Read Models
+
+## 33.1 OpportunityListItem
+
+Beispiel:
+
+```csharp
+public sealed record OpportunityListItem(
+    long Id,
+    string Title,
+    OpportunityStatus Status,
+    bool IsArchived,
+    string PlatformName,
+    DateTimeOffset? PublishedAtUtc,
+    string? RateSummary,
+    string SkillSummary);
+```
+
+---
+
+## 33.2 Keine Domain-Entität als GridRow
+
+**TD-035**
+
+Die Hauptliste verwendet ein gezieltes Read Model.
+
+So müssen große Description-Texte nicht pro Zeile geladen werden.
+
+---
+
+# 34. Datenänderungen
+
+## 34.1 Created/Updated
+
+Application Services setzen:
+
+- `CreatedAtUtc`,
+- `UpdatedAtUtc`.
+
+---
+
+## 34.2 Archiv
+
+Archive setzt:
+
+```text
+IsArchived = true
+ArchivedAtUtc = clock.UtcNow
+```
+
+Restore setzt:
+
+```text
+IsArchived = false
+ArchivedAtUtc = null
+```
+
+Status bleibt unverändert.
+
+---
+
+## 34.3 LastObservedAt
+
+**TD-036**
+
+`LastObservedAtUtc` darf auch nach `Expired` oder `Closed` aktualisiert werden.
+
+Es beschreibt eine Beobachtung, nicht Aktivität der Opportunity.
+
+---
+
+# 35. Statushistorie
+
+## 35.1 Schreibregel
+
+Bei tatsächlicher Statusänderung:
+
+```text
+old_status
+new_status
+changed_at_utc
+```
+
+speichern.
+
+---
+
+## 35.2 Kein History-Eintrag bei identischem Status
+
+---
+
+# 36. Datenbanktransaktionen
+
+## 36.1 Create Opportunity
+
+Atomar:
+
+```text
+Opportunity
++ first Listing
++ Skills
++ optional Note
+```
+
+---
+
+## 36.2 Delete Opportunity
+
+Atomar löschen:
+
+- Opportunity,
+- Listings,
+- Proposal(s),
+- Notes,
+- Status History,
+- Opportunity-Skill Links.
+
+Skills und Platforms bleiben.
+
+---
+
+## 36.3 Proposal
+
+Create/Update Proposal in eigener Transaktion.
+
+---
+
+# 37. Seed Data
+
+## 37.1 Plattformen
+
+Seed:
+
+```text
+Freelancermap
+PeoplePerHour
+Randstad Professional / GULP
+```
+
+---
+
+## 37.2 Kein `Manual` als Plattform
+
+**TD-037**
+
+`Manual` ist eine Capture Method, keine Platform.
+
+---
+
+## 37.3 Skills
+
+Keine große Skill-Liste auf Vorrat.
+
+Optional wenige Demo-/Testskills nur in Testdaten.
+
+Produktiv entstehen Skills aus Benutzereingaben.
+
+---
+
+# 38. Einstellungen
+
+## 38.1 MVP
+
+Keine große Settings-UI.
+
+Technisch konfigurierbar:
+
+- Datenbankpfad Override für Entwicklung,
+- Log-Level,
+- optional Standardwährung.
+
+---
+
+## 38.2 Zeitzone
+
+Persistenz ist UTC.
+
+Eine spätere Anzeige-Zeitzone wird als Presentation Setting ergänzt.
+
+---
+
+# 39. Dateiformate
+
+## 39.1 Backup
+
+ZIP + SQLite Snapshot + Manifest.
+
+---
+
+## 39.2 Export
+
+Nicht mit Backup vermischen.
+
+Spätere CSV/JSON-Exporte erhalten eigene Serializer.
+
+---
+
+# 40. Integrationen später
+
+## 40.1 Erst bei realem Adapter
+
+Wenn URL-/Paste-/Discovery-Integration beginnt, wird `Integrations` ergänzt.
+
+---
+
+## 40.2 Adapter darf keine DB kennen
+
+Adapter liefert Candidate-DTO.
+
+Application validiert und persistiert.
+
+---
+
+## 40.3 Capability Interfaces
+
+Später lieber:
+
+```text
+ICaptureCapability
+IDiscoveryCapability
+IObservationCapability
+```
+
+als ein gigantisches Interface.
+
+---
+
+# 41. Codequalität
+
+## 41.1 XML-Dokumentation
+
+**TD-038**
+
+Öffentliche APIs, Domain-Objekte und nicht triviale Application Contracts erhalten XML-Kommentare.
+
+---
+
+## 41.2 Inline-Kommentare
+
+Erklären:
+
+- warum eine Entscheidung nötig ist,
+- ungewöhnliche SQLite-Eigenheiten,
+- Migrationslogik,
+- Sicherheits-/Integritätsgründe.
+
+Nicht jeden offensichtlichen `if` kommentieren.
+
+---
+
+## 41.3 Methodenlänge
+
+Keine harte Zeilengrenze.
+
+Methoden sollen eine klar benennbare Verantwortung besitzen.
+
+---
+
+# 42. Verbotene Kurzschlüsse
+
+**TD-039**
+
+Nicht zulässig:
+
+```text
+Form -> SQLiteConnection
+Form -> SQL
+Platform Parser -> Repository
+Domain -> MessageBox
+Domain -> DateTime.Now
+Opportunity.Status = Applied
+Opportunity.Status = Archived
+Opportunity.PlatformId
+ProposalRate in Listing
+ListingRate in Proposal
+```
+
+---
+
+# 43. Refactoring des vorhandenen Projekts
+
+## 43.1 `Core` → `Domain`
+
+Bestehende reine Domain-Typen werden migriert.
+
+`FreelanceProject` wird nicht einfach umbenannt, sondern fachlich aufgeteilt.
+
+---
+
+## 43.2 neues `Application`
+
+Use Cases und Ports werden aus Core/UI herausgezogen.
+
+---
+
+## 43.3 `Data` → `Infrastructure`
+
+SQLite-Implementierung wird fachlich neu ausgerichtet.
+
+---
+
+## 43.4 `App` → `WinForms`
+
+UI bleibt Windows Forms, wird aber von Repository-Aufrufen entkoppelt.
+
+---
+
+## 43.5 Tests splitten
+
+Der alte Gesamttestprojekt-Ansatz wird schrittweise aufgeteilt.
+
+Kein Big-Bang nötig:
+
+1. neue Testprojekte anlegen,
+2. Tests verschieben,
+3. altes Testprojekt leeren,
+4. entfernen.
+
+---
+
+# 44. Keine Roadmap in diesem Dokument
+
+**TD-040**
+
+Dieses Technical Design enthält keine:
+
+- Versionsnummern für Features,
+- Meilenstein-Reihenfolge,
+- Terminzusagen.
+
+Dafür existiert `060_Product_Roadmap.md`.
+
+---
+
+# 45. Definition of Done für technische Änderungen
+
+Eine technische Änderung ist erst fertig, wenn:
+
+- Build erfolgreich,
+- betroffene Tests erfolgreich,
+- keine neue verbotene Abhängigkeit,
+- DB-Migration vorhanden, falls nötig,
+- Migrationstest vorhanden,
+- Benutzerfehler verständlich,
+- Logging ohne sensible Volltexte,
+- XML-Doku an neuen öffentlichen APIs,
+- relevante Dokumente aktualisiert.
+
+---
+
+# 46. Technical-Design-Compliance-Check
+
+Vor Merge prüfen:
+
+- [ ] Domain kennt kein UI.
+- [ ] Domain kennt kein SQLite.
+- [ ] Application kennt kein UI.
+- [ ] Application kennt kein SQLite.
+- [ ] UI verwendet keine SQLiteConnection.
+- [ ] Opportunity und Listing bleiben getrennt.
+- [ ] Proposal bleibt getrennt.
+- [ ] Archive ist kein Status.
+- [ ] Notes sind keine Activities.
+- [ ] Hourly/Daily/Fixed bleiben getrennt.
+- [ ] UTC wird eingehalten.
+- [ ] DateOnly wird nicht künstlich UTC gemacht.
+- [ ] Unknown wird nicht zu 0.
+- [ ] SQL ist parametrisiert.
+- [ ] Use Case ist bei Mehrfachschreibvorgängen transaktional.
+- [ ] Schemaänderung hat Migration.
+- [ ] Migration zerstört keine Alt-Daten.
+- [ ] Backup nutzt konsistenten Snapshot.
+- [ ] Tests verwenden keine Produktiv-DB.
+- [ ] keine Zukunfts-Infrastruktur ohne aktuellen Use Case.
+
+---
+
+# 47. Zusammenfassung
+
+Das konkrete MVP-Design basiert weiterhin auf:
+
+```text
+C#
+.NET 10
+Windows Forms
+SQLite
+Microsoft.Data.Sqlite
+xUnit
+```
+
+Der technische Aufbau wird jedoch vom alten:
+
+```text
+App
+Core
+Data
+projects
+```
+
+auf den beschlossenen, klareren Aufbau weiterentwickelt:
+
+```text
+WinForms
+    ↓
+Application
+    ↓
+Domain
+
+Infrastructure
+    ↑
+Application Ports
+```
+
+und fachlich:
+
+```text
+Opportunity
+  ├── Listing(s)
+  ├── Skills
+  ├── Notes
+  └── Proposal(s)
+```
+
+Die zentrale technische Leitlinie bleibt:
+
+> **Bekannte Sackgassen jetzt vermeiden – zukünftige Features aber erst implementieren, wenn sie tatsächlich gebraucht werden.**
